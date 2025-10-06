@@ -5,15 +5,15 @@ from openpyxl.styles import NamedStyle
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl import Workbook
 
-st.title("Extract Rows by Names from 7-Sheet Excel with ISIN Autofill (Column Index Lookup)")
+st.title("Extract Rows by Names from Excel (All Sheets) with ISIN Autofill (Column Index Lookup)")
 
-uploaded_file = st.file_uploader("Upload Excel file with 7 sheets", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload Excel file (any number of sheets)", type=["xlsx"])
 lookup_file = st.file_uploader("Upload ISIN Lookup Excel file (no headers, fixed columns)", type=["xlsx"])
 
 if uploaded_file:
     xls = pd.ExcelFile(uploaded_file)
     sheet_names = xls.sheet_names
-    sheets_to_use = sheet_names[:7]
+    sheets_to_use = sheet_names   # ✅ Now all sheets are considered
 
     # Collect unique names from all sheets
     all_names = set()
@@ -26,12 +26,11 @@ if uploaded_file:
 
     lookup_df = None
     if lookup_file:
-        # Read lookup file with no headers, usecols by column letters
-        # We'll assign our own column names for convenience
+        # Read lookup file with no headers, usecols by column numbers
         lookup_df = pd.read_excel(
             lookup_file,
             header=None,
-            usecols=[0,1,5,7]  # A, B, F, H
+            usecols=[0, 1, 5, 7]  # A, B, F, H
         )
         lookup_df.columns = ['nbfc', 'isin', 'issue_date', 'maturity_date']
 
@@ -45,31 +44,35 @@ if uploaded_file:
         for sheet in sheets_to_use:
             df = pd.read_excel(xls, sheet_name=sheet, usecols="A:J")
 
-            filtered = df[(df['Name'].astype(str).isin(selected_names)) & (pd.to_numeric(df['Units'], errors='coerce') > 0)]
+            filtered = df[(df['Name'].astype(str).isin(selected_names)) & 
+                          (pd.to_numeric(df['Units'], errors='coerce') > 0)]
 
             if not filtered.empty:
                 # Drop empty or unnamed columns
-                cols_to_drop = [col for col in filtered.columns if (isinstance(col, str) and (col.strip() == '' or col.startswith('Unnamed')))]
+                cols_to_drop = [col for col in filtered.columns 
+                                if (isinstance(col, str) and (col.strip() == '' or col.startswith('Unnamed')))]
                 filtered = filtered.drop(columns=cols_to_drop)
 
                 # Insert empty ISIN column after 'NBFC'
-                idx = filtered.columns.get_loc('NBFC') + 1
-                filtered.insert(idx, 'ISIN', '')
+                if 'NBFC' in filtered.columns:
+                    idx = filtered.columns.get_loc('NBFC') + 1
+                    filtered.insert(idx, 'ISIN', '')
 
                 if lookup_df is not None:
                     # Convert filtered dates to datetime
-                    filtered['Issue Date'] = pd.to_datetime(filtered['Issue Date'], errors='coerce')
-                    filtered['Maturity Date'] = pd.to_datetime(filtered['Maturity Date'], errors='coerce')
+                    if 'Issue Date' in filtered.columns and 'Maturity Date' in filtered.columns:
+                        filtered['Issue Date'] = pd.to_datetime(filtered['Issue Date'], errors='coerce')
+                        filtered['Maturity Date'] = pd.to_datetime(filtered['Maturity Date'], errors='coerce')
 
-                    def get_isin(row):
-                        match = lookup_df[
-                            (lookup_df['nbfc'] == row['NBFC']) &
-                            (lookup_df['issue_date'] == row['Issue Date']) &
-                            (lookup_df['maturity_date'] == row['Maturity Date'])
-                        ]
-                        return match.iloc[0]['isin'] if not match.empty else ''
+                        def get_isin(row):
+                            match = lookup_df[
+                                (lookup_df['nbfc'] == row['NBFC']) &
+                                (lookup_df['issue_date'] == row['Issue Date']) &
+                                (lookup_df['maturity_date'] == row['Maturity Date'])
+                            ]
+                            return match.iloc[0]['isin'] if not match.empty else ''
 
-                    filtered['ISIN'] = filtered.apply(get_isin, axis=1)
+                        filtered['ISIN'] = filtered.apply(get_isin, axis=1)
 
                 combined_rows.append(filtered)
 
